@@ -1,4 +1,5 @@
 # load libraries
+
 from flask import Flask, jsonify, request
 import pandas as pd
 import os
@@ -6,11 +7,11 @@ import os
 # start app
 app = Flask(__name__)
 
-# load the salary data once when the app starts
-salary_data = pd.read_excel('week12/data/Employee Annual Salaried-Diamondback 2025.xlsx')
+# load the power outages data once when the app starts
+outages_data = pd.read_csv('week12/data/Power_Outages_-_County_20260430.csv')
 
-# clean column names by stripping white space
-salary_data.columns = [col.strip() for col in salary_data.columns]
+# clean the data: remove commas from customers column and convert to int
+outages_data['customers'] = outages_data['customers'].str.replace(',', '').astype(int)
 
 # defining a function that converts a dataframe into a list of JSON dictionaries
 def rows_to_json(df):
@@ -27,79 +28,73 @@ def index():
     return jsonify({
         # we can customize what is shown on this page. It will be shown as JSON, but
         # other API endpoints for landing pages might have fancier built-out pages to show information
-        'description': 'University of Maryland Salary Data API',
+        'description': 'Power Outages API',
         'endpoints': [
             {
-                'path': '/api/salaries', # this links to /api/salaries
+                'path': '/api/outages', # this links to /api/outages
                 'method': 'GET',
-                'description': 'Return all records in the salary data',
-                'params': ['division', 'employee_type', 'min_salary', 'max_salary']
+                'description': 'Return all outages data',
+                'params': ['area', 'min_outages', 'max_outages']
             },
             {
-                'path': '/api/salaries/search',
+                'path': '/api/outages/search',
                 'method': 'GET',
-                'description': 'Search by employee name. Returns all records with case-insensitive partial matches to the query.',
-                'params': ['name (required)']
+                'description': 'Search by county area name with optional outage filters.',
+                'params': ['area (required)', 'min_outages', 'max_outages']
             },
             {
-                'path': '/api/salaries/divisions',
+                'path': '/api/outages/worst',
                 'method': 'GET',
-                'description': 'List all unique divisions.',
-                'params': []
+                'description': 'List counties with highest number of outages with optional customer filtering.',
+                'params': ['n (default: 10)', 'min_customers', 'max_customers']
             },
             {
-                'path': '/api/salaries/top',
+                'path': '/api/outages/affected',
                 'method': 'GET',
-                'description': 'Top-N highest-paid employees.',
+                'description': 'List counties with most customers affected by outages.',
                 'params': ['n (default: 10)']
             },
         ]
     })
 
 """
-Endpoint 1: GET /api/salaries
-   Returns all records. 
-   Supports optional query parameters
+Endpoint 1: GET /api/outages
 
-   Examples of parameters:
-     ?division=PRES
-     ?employee_type=Faculty Regular
-     ?min_salary=100000
-     ?max_salary=500000
+Returns all outages records. 
+Supports optional query parameters
+
+Examples of parameters:
+  ?area=Baltimore
+  ?min_outages=10
+  ?max_outages=100
 """
-@app.route('/api/salaries') # defines the URL endpoint: /api/salaries
-def get_salaries(): # function that runs when this endpoint is accessed
-    # create a dataframe that is a copy of our salary_data dataframe, so we don't modify the original
-    df = salary_data.copy() 
+@app.route('/api/outages') # defines the URL endpoint: /api/outages
+def get_outages(): # function that runs when this endpoint is accessed
+    # create a dataframe that is a copy of our outages_data dataframe, so we don't modify the original
+    df = outages_data.copy() 
 
     ## This is where we define our parameters
 
-    # get the value of ?division= from the URL (returns None if not provided)
-    division = request.args.get('division')
-    # get the value of ?employee_type= from the URL
-    employee_type = request.args.get('employee_type')
-    # get the value of ?min_salary= and convert it to a float (number)
-    min_salary = request.args.get('min_salary', type=float)
-    # get the value of ?max_salary= and convert it to a float
-    max_salary = request.args.get('max_salary', type=float)
+    # get the value of ?area= from the URL (returns None if not provided)
+    area = request.args.get('area')
+    # get the value of ?min_outages= and convert it to an integer (number)
+    min_outages = request.args.get('min_outages', type=int)
+    # get the value of ?max_outages= and convert it to an integer
+    max_outages = request.args.get('max_outages', type=int)
 
-    # if a division was provided in the URL
-    if division:
-        # filter the dataframe to only include rows where Division matches.
-        # .upper() makes the comparison case-insensitive (PRES will work, but pres won't)
-        df = df[df['Division'].str.upper() == division.upper()]
-    # if an employee type was provided,
-    if employee_type:
-        # filter rows where Employee Type matches (case-insensitive).
-        df = df[df['Employee Type'].str.lower() == employee_type.lower()]
-    # if a minimum salary was provided,
-    if min_salary is not None:
-        # filter to only rows where salary is greater than or equal to min_salary.
-        df = df[df['Appt Base Annual Salary'] >= min_salary]
-    # if a maximum salary was provided,
-    if max_salary is not None:
-        # filter to only rows where salary is less than or equal to max_salary.
-        df = df[df['Appt Base Annual Salary'] <= max_salary]
+    # if an area was provided in the URL
+    if area:
+        # filter the dataframe to only include rows where area matches.
+        # case=False makes the comparison case-insensitive
+        df = df[df['area'].str.contains(area, case=False, na=False)]
+    # if a minimum outages was provided,
+    if min_outages is not None:
+        # filter to only rows where outages is greater than or equal to min_outages.
+        df = df[df['outages'] >= min_outages]
+    # if a maximum outages was provided,
+    if max_outages is not None:
+        # filter to only rows where outages is less than or equal to max_outages.
+        df = df[df['outages'] <= max_outages]
     
     # return the result after this filtering
     return jsonify({
@@ -111,33 +106,48 @@ def get_salaries(): # function that runs when this endpoint is accessed
 
 
 """
-Endpoint 2: GET /api/salaries/search?name=
+Endpoint 2: GET /api/outages/search?area=
 
-Name parameter is required. 
-Example: GET /api/salaries/search?name=Frese
+Area parameter is required. 
+Example: GET /api/outages/search?area=Baltimore&min_outages=5&max_outages=50
 
-Case-insensitive partial-match search on the "Primary Name" column 
+Case-insensitive partial-match search on the "area" column with optional outage filters
 
 """
-@app.route('/api/salaries/search') # defines the endpoint: /api/salaries/search
-def search_by_name():  # function that runs when this endpoint is accessed
+@app.route('/api/outages/search') # defines the endpoint: /api/outages/search
+def search_outages():  # function that runs when this endpoint is accessed
     
-    ### Defining our name parameter
-    # get the value of ?name= from the URL
-    # if no name is provided, default to an empty string ''
-    name = request.args.get('name', '')
-    # if the user did NOT provide a name parameter,
-    if not name:
+    ### Defining our parameters
+    # get the value of ?area= from the URL
+    # if no area is provided, default to an empty string ''
+    area = request.args.get('area', '')
+    # get the value of ?min_outages= and convert it to an integer
+    min_outages = request.args.get('min_outages', type=int)
+    # get the value of ?max_outages= and convert it to an integer
+    max_outages = request.args.get('max_outages', type=int)
+    
+    # if the user did NOT provide an area parameter,
+    if not area:
         # return an error message as JSON
         # 400 error means the client made a mistake
-        ### This makes our name parameter required
-        return jsonify({'error': 'Provide a ?name= query parameter'}), 400
+        ### This makes our area parameter required
+        return jsonify({'error': 'Provide a ?area= query parameter'}), 400
 
-     # create a filtered dataframe that looks at 'Primary Name' to see if it contains 
-     # the string that the user specified in ?name= in the URL
+     # create a filtered dataframe that looks at 'area' to see if it contains 
+     # the string that the user specified in ?area= in the URL
      # case=False makes it case-insensitive
      # na=False prevents errors if there are missing values
-    df = salary_data[salary_data['Primary Name'].str.contains(name, case=False, na=False)]
+    df = outages_data[outages_data['area'].str.contains(area, case=False, na=False)]
+    
+    # apply additional filters
+    # if a minimum outages was provided,
+    if min_outages is not None:
+        # filter to only rows where outages is greater than or equal to min_outages
+        df = df[df['outages'] >= min_outages]
+    # if a maximum outages was provided,
+    if max_outages is not None:
+        # filter to only rows where outages is less than or equal to max_outages
+        df = df[df['outages'] <= max_outages]
     
     # return results as JSON
     return jsonify({
@@ -148,29 +158,58 @@ def search_by_name():  # function that runs when this endpoint is accessed
     })
 
 """
-Endpoint 3: GET /api/salaries/divisions
-Returns a list of all unique divisions in the dataset.
-No parameters
+Endpoint 3: GET /api/outages/worst?n=10
+
+Returns the top N counties with highest number of outages. Default N is 10.
+Optional parameters to filter by customer count.
+Example: GET /api/outages/worst?n=5&min_customers=50000&max_customers=300000
 """
-@app.route('/api/salaries/divisions')
-def get_divisions():
-    divisions = sorted(salary_data['Division'].dropna().unique().tolist())
-    return jsonify({'divisions': divisions})
+@app.route('/api/outages/worst')
+def worst_outages():
+    ### Defining our parameters
+    # if there is something after ?n=, save it to the object n.
+    # if there is nothing after ?n=, default to 10
+    # ensure n is an integer
+    n = request.args.get('n', default=10, type=int)
+    # get the value of ?min_customers= and convert it to an integer
+    min_customers = request.args.get('min_customers', type=int)
+    # get the value of ?max_customers= and convert it to an integer
+    max_customers = request.args.get('max_customers', type=int)
+    
+    # filter our outages data to the largest N outages
+    df = outages_data.nlargest(n, 'outages')
+    
+    # apply additional customer filters
+    # if a minimum customers was provided,
+    if min_customers is not None:
+        # filter to only rows where customers is greater than or equal to min_customers
+        df = df[df['customers'] >= min_customers]
+    # if a maximum customers was provided,
+    if max_customers is not None:
+        # filter to only rows where customers is less than or equal to max_customers
+        df = df[df['customers'] <= max_customers]
+    
+    # return as JSON
+    return jsonify({
+        'count': len(df), # give the count of rows
+        'results': rows_to_json(df) # turn rows to json
+    })
+
 
 """
-Endpoint 4: GET /api/salaries/top?n=10
+Endpoint 4: GET /api/outages/affected?n=10
 
-Returns the top N highest-paid employees. Default N is 10.
+Returns the top N counties with most customers affected by outages. Default N is 10.
 """
-@app.route('/api/salaries/top')
-def top_earners():
+@app.route('/api/outages/affected')
+def most_affected():
     ### Defining our parameter n
     # if there is something after ?n=, save it to the object n.
     # if there is nothing after ?n=, default to 10
     # ensure n is an integer
     n = request.args.get('n', default=10, type=int)
-    # filter our salary data to the largest N salaries
-    df = salary_data.nlargest(n, 'Appt Base Annual Salary')
+    # filter our outages data to the largest N by customers affected
+    df = outages_data.nlargest(n, 'customers')
     
     # return as JSON
     return jsonify({
